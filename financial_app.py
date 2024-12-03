@@ -1,8 +1,9 @@
 # Import libraries
-import streamlit as st
 import pandas as pd
-import joblib
 import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 # Function to compute compound interest
 def future_value(current_savings, annual_rate, time_years, compounding_periods=12):
@@ -12,41 +13,66 @@ def future_value(current_savings, annual_rate, time_years, compounding_periods=1
 def adjust_for_inflation(target_amount, inflation_rate, time_years):
     return target_amount * (1 + inflation_rate) ** time_years
 
-# Load the trained model
-model = joblib.load("readmission_model.pkl")
+# Load dataset (replace with your dataset path)
+data = pd.read_csv("financial_target_data.csv")
 
-# Streamlit app
-st.title("Financial Target Contribution Calculator")
-st.write("Calculate how much you need to contribute monthly to reach your financial goal.")
+# Feature engineering
+data['future_savings'] = data.apply(lambda row: future_value(
+    row['current_savings'], row['interest_rate'], row['time_to_target'] / 12), axis=1)
 
-# User inputs
-current_savings = st.number_input("Current Savings ($)", min_value=0.0, value=5000.0, step=100.0)
-target_amount = st.number_input("Target Amount ($)", min_value=0.0, value=50000.0, step=1000.0)
-time_to_target = st.number_input("Time to Target (months)", min_value=1, value=24, step=1)
-interest_rate = st.number_input("Annual Interest Rate (%)", min_value=0.0, max_value=100.0, value=5.0) / 100
-inflation_rate = st.number_input("Annual Inflation Rate (%)", min_value=0.0, max_value=100.0, value=2.0) / 100
-income = st.number_input("Annual Income ($)", min_value=0.0, value=60000.0, step=1000.0)
-monthly_expenses = st.number_input("Monthly Expenses ($)", min_value=0.0, value=2000.0, step=100.0)
-monthly_debt = st.number_input("Monthly Debt Payments ($)", min_value=0.0, value=500.0, step=100.0)
+data['adjusted_target'] = data.apply(lambda row: adjust_for_inflation(
+    row['target_amount'], row['inflation_rate'], row['time_to_target'] / 12), axis=1)
 
-# Feature engineering based on user inputs
-future_savings = future_value(current_savings, interest_rate, time_to_target / 12)
-adjusted_target = adjust_for_inflation(target_amount, inflation_rate, time_to_target / 12)
-available_income = income - (monthly_expenses + monthly_debt) * 12
+# New features to include expenses and debt
+data['available_income'] = data['income'] - data['monthly_expenses'] - data['monthly_debt']
 
-# Prepare input features for the model
-input_data = pd.DataFrame({
-    "future_savings": [future_savings],
-    "adjusted_target": [adjusted_target],
-    "time_to_target": [time_to_target],
-    "interest_rate": [interest_rate],
-    "available_income": [available_income]
+# Final input features
+features = ['future_savings', 'adjusted_target', 'time_to_target', 'interest_rate', 'available_income']
+X = data[features]
+y = data['monthly_contribution']  # Target variable
+
+# Split dataset into training and testing
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Build a regression model
+model = RandomForestRegressor(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
+
+# Make predictions
+y_pred = model.predict(X_test)
+
+# Evaluate the model
+mae = mean_absolute_error(y_test, y_pred)
+rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+r2 = r2_score(y_test, y_pred)
+
+print(f"Mean Absolute Error (MAE): {mae:.2f}")
+print(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
+print(f"R2 Score: {r2:.2f}")
+
+# Example prediction for a new individual
+new_data = pd.DataFrame({
+    "current_savings": [5000],
+    "target_amount": [50000],
+    "time_to_target": [24],  # 2 years
+    "interest_rate": [0.05],  # 5% annual
+    "inflation_rate": [0.02],  # 2% annual
+    "income": [60000],  # Annual income
+    "monthly_expenses": [2000],
+    "monthly_debt": [500]
 })
 
-# Predict the monthly contribution
-if st.button("Calculate Contribution"):
-    predicted_contribution = model.predict(input_data)[0]
-    st.success(f"Estimated Monthly Contribution: ${predicted_contribution:.2f}")
+# Feature engineering for new data
+new_data['future_savings'] = new_data.apply(lambda row: future_value(
+    row['current_savings'], row['interest_rate'], row['time_to_target'] / 12), axis=1)
 
-# Footer
-st.write("Developed using Machine Learning and Streamlit.")
+new_data['adjusted_target'] = new_data.apply(lambda row: adjust_for_inflation(
+    row['target_amount'], row['inflation_rate'], row['time_to_target'] / 12), axis=1)
+
+new_data['available_income'] = new_data['income'] - new_data['monthly_expenses'] - new_data['monthly_debt']
+
+# Select features for prediction
+new_features = ['future_savings', 'adjusted_target', 'time_to_target', 'interest_rate', 'available_income']
+predicted_contribution = model.predict(new_data[new_features])
+
+print(f"Predicted Monthly Contribution: ${predicted_contribution[0]:.2f}")
